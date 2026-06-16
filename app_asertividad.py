@@ -333,7 +333,7 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
                 for j in range(2):
                     if i + j < len(grupos_unicos):
                         grupo = grupos_unicos[i + j]
-                        df_grp = df_completos[df_completos['GRUPO'] == group]
+                        df_grp = df_completos[df_completos['GRUPO'] == grupo]
                         with cols[j]:
                             p_ana, p_pre, p_con = df_grp['Analizado'].mean(), df_grp['Presupuestado'].mean(), df_grp['Contratado'].mean()
                             v_pre_ana = ((p_pre - p_ana) / p_ana * 100) if p_ana else float('nan')
