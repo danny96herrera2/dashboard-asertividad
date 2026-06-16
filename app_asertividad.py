@@ -85,10 +85,9 @@ elif os.path.exists("base_datos.csv"):
     archivo_residente = "base_datos.csv"
 
 if archivo_residente is None:
-    st.info("👋 **¡Bienvenido al sistema corporativo!**\n\nPara activar el Dashboard definitivo para toda la empresa, sube tu archivo consolidado a la carpeta principal de tu GitHub renombrado exactamente como **`base_datos.xlsx`**.")
+    st.info("👋 **¡Bienvenido al sistema corporativo!**\n\nPara activar el Dashboard, sube tu archivo consolidado a GitHub renombrado exactamente como **`base_datos.xlsx`**.")
     st.stop()
 
-# Si el archivo existe, el sistema lo lee de forma invisible e instantánea
 with st.spinner("🚀 Sincronizando Base de Datos de Producción..."):
     df, mensaje = cargar_y_procesar_base(archivo_residente)
     
@@ -101,16 +100,14 @@ if mensaje != "OK":
 # ==========================================
 st.sidebar.header("🔍 Panel de Filtros Globales")
 
-# Filtro Global por Cohorte de Año
 años_construccion = sorted([int(x) for x in df[(df['FASE DEL PRECIO'] == 'Contratado') & (df['AÑO_FECHA'].notna())]['AÑO_FECHA'].unique()])
-año_seleccionado = st.sidebar.multiselect("📅 Año de Construcción", options=años_construccion, help="Filtra proyectos construidos este año y trae su historial previo de forma global.")
+año_seleccionado = st.sidebar.multiselect("📅 Año de Construcción", options=años_construccion, help="Filtra proyectos construidos este año y trae su historial previo.")
 
 df_base = df.copy()
 if año_seleccionado:
     proyectos_del_año = df[(df['FASE DEL PRECIO'] == 'Contratado') & (df['AÑO_FECHA'].isin(año_seleccionado))]['PROYECTO'].unique()
     df_base = df_base[df_base['PROYECTO'].isin(proyectos_del_año)]
 
-# Filtros Geográficos y Técnicos
 lista_ciudades = sorted([str(x) for x in df_base.get('CIUDAD', pd.Series(dtype=str)).dropna().unique()])
 ciudad = st.sidebar.multiselect("📍 Filtrar por Ciudad", options=lista_ciudades)
 df_f1 = df_base[df_base.get('CIUDAD', pd.Series(dtype=str)).astype(str).isin(ciudad)] if ciudad else df_base
@@ -123,7 +120,6 @@ lista_actividades = sorted([str(x) for x in df_f2.get('ACTIVIDAD', pd.Series(dty
 actividad = st.sidebar.multiselect("🛠️ Filtrar por Actividad", options=lista_actividades)
 df_f3 = df_f2[df_f2.get('ACTIVIDAD', pd.Series(dtype=str)).astype(str).isin(actividad)] if actividad else df_f2
 
-# Filtro por Contratista (Lógica Cruzada)
 if 'CONTRATISTA/PROVEEDOR' in df_f3.columns:
     lista_contratistas = sorted([str(x) for x in df_f3['CONTRATISTA/PROVEEDOR'].dropna().unique() if str(x).strip() != ''])
     contratista = st.sidebar.multiselect("👷 Filtrar por Contratista/Proveedor", options=lista_contratistas)
@@ -139,7 +135,6 @@ if 'CONTRATISTA/PROVEEDOR' in df_f3.columns:
 else:
     df_filtrado = df_f3
 
-# Lógica Dinámica Moneda (Ascensores)
 es_ascensor = df_filtrado.get('GRUPO', pd.Series(dtype=str)).astype(str).str.upper().str.contains('ASCENSOR').any()
 col_valor = 'VALOR EN PESOS COLOMBIANOS X PARADA'
 simbolo_moneda = "$"
@@ -153,20 +148,56 @@ if es_ascensor:
         simbolo_moneda = "USD $"
 
 # ==========================================
-# 5. PANEL DE PONDERACIONES (PESOS)
+# 5. PANEL DE PONDERACIONES (PESOS) CON AUTOCARGA
 # ==========================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚖️ **Ponderación de Asertividad**")
-usar_pesos = st.sidebar.toggle("Activar Pesos Ponderados")
+usar_pesos = st.sidebar.toggle("Activar Pesos Ponderados", value=True)
 
 df_pesos_guardados = None
 if usar_pesos:
     with st.expander("🛠️ Panel de Configuración de Pesos (%)", expanded=True):
-        st.markdown("Ajusta el peso de cada **Grupo** dentro del proyecto y de cada **Actividad** dentro de su grupo. El sistema multiplicará la variación por estos pesos.")
+        st.markdown("Valores cargados por defecto. Puedes modificarlos manualmente aquí si lo necesitas:")
         df_config_pesos = df_filtrado[['GRUPO', 'ACTIVIDAD']].drop_duplicates().reset_index(drop=True)
+        
+        # Pesos matemáticos base por si no hay archivo
         df_config_pesos['Peso Grupo (%)'] = 100.0 / df_config_pesos['GRUPO'].nunique() if not df_config_pesos.empty else 100.0
         df_config_pesos['Peso Actividad (%)'] = df_config_pesos.groupby('GRUPO')['ACTIVIDAD'].transform(lambda x: 100.0 / len(x))
         
+        # MAGIA: Intentar leer el archivo de pesos si existe en GitHub
+        if os.path.exists("pesos.csv"):
+            try:
+                df_pesos_csv = pd.read_csv("pesos.csv", sep=None, engine='python', encoding='utf-8-sig')
+                df_pesos_csv.columns = df_pesos_csv.columns.astype(str).str.strip().str.upper()
+                
+                if 'GRUPO' in df_pesos_csv.columns:
+                    # Detectar automáticamente la columna de los valores numéricos
+                    col_peso_csv = [c for c in df_pesos_csv.columns if c not in ['GRUPO', 'ACTIVIDAD'] and not c.startswith('UNNAMED')][0]
+                    
+                    df_pesos_csv['GRUPO'] = df_pesos_csv['GRUPO'].astype(str).str.strip().str.upper()
+                    df_pesos_csv['ACTIVIDAD'] = df_pesos_csv['ACTIVIDAD'].fillna('').astype(str).str.strip().str.upper()
+                    
+                    # 1. Regla Grupos: Si Actividad está vacía o es 'NAN'
+                    df_grupos = df_pesos_csv[df_pesos_csv['ACTIVIDAD'].isin(['', 'NAN', 'NONE'])]
+                    dict_grupos = dict(zip(df_grupos['GRUPO'], pd.to_numeric(df_grupos[col_peso_csv], errors='coerce').fillna(0)))
+                    
+                    # 2. Regla Actividades: Si Actividad tiene texto
+                    df_act = df_pesos_csv[~df_pesos_csv['ACTIVIDAD'].isin(['', 'NAN', 'NONE'])]
+                    dict_act = dict(zip(df_act['GRUPO'] + "||" + df_act['ACTIVIDAD'], pd.to_numeric(df_act[col_peso_csv], errors='coerce').fillna(0)))
+                    
+                    def mapear_grupo(g):
+                        return dict_grupos.get(str(g).strip().upper(), 100.0 / df_config_pesos['GRUPO'].nunique())
+                        
+                    def mapear_actividad(row):
+                        k = str(row['GRUPO']).strip().upper() + "||" + str(row['ACTIVIDAD']).strip().upper()
+                        return dict_act.get(k, 100.0 / len(df_config_pesos[df_config_pesos['GRUPO']==row['GRUPO']]))
+
+                    df_config_pesos['Peso Grupo (%)'] = df_config_pesos['GRUPO'].apply(mapear_grupo)
+                    df_config_pesos['Peso Actividad (%)'] = df_config_pesos.apply(mapear_actividad, axis=1)
+                    
+            except Exception as e:
+                st.warning(f"⚠️ Se detectó 'pesos.csv' pero hubo un error al leerlo: {e}")
+
         df_pesos_guardados = st.data_editor(df_config_pesos, hide_index=True, use_container_width=True)
 
 # ==========================================
