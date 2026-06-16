@@ -1,0 +1,64 @@
+﻿Grupo;Actividad;Pesos
+ASCENSORES;;0.06
+VENTANERIA;;0.15
+PUERTAS METALICAS DE ACCESO;;0.15
+PUERTAS CORTA FUEGO;;0.15
+RED CONTRA INCENDIO;;0.06
+RED DE GAS;;0.06
+RED HIDROSANITARIA (M.O);;0.1
+M.O ESTRUCTURA;;0.05
+M.O ENCHAPES Y PISOS;;0.05
+M.O MAMPOSTERIA Y PAÑETES;;0.05
+M.O SUBESTRUCTURA;;0.05
+M.O ESTUCO Y PINTURA;;0.05
+SHUT BASURAS;;0.02
+SUBESTRUCTURA;ESTN - M.O Dados;0.1
+SUBESTRUCTURA;ESTN - M.O Excavación Manual 0-2m Cimentación;0.05
+SUBESTRUCTURA;ESTN - M.O LLeno manual Material de excavación Cimentación;0.05
+SUBESTRUCTURA;ESTN- M.O Losa Contrapiso e: 0.10 a 0.15 m;0.15
+SUBESTRUCTURA;ESTN - M.O Instalación de acero - Cimentacion;0.25
+SUBESTRUCTURA;ESTN - M.O Instalacion malla electrosoldada - Cimentación;
+SUBESTRUCTURA;ESTN - M.O Muro de Contención;0.2
+SUBESTRUCTURA;ESTN - M.O Solado e=0.05m;0.1
+SUBESTRUCTURA;ESTN - M.O Viga Cimentación;0.1
+ESTRUCTURA;ESTN - M.O. Columna Rectangular;0.05
+ESTRUCTURA;ESTN - M.O Escalera x m3 - Sin Acabados;0.05
+ESTRUCTURA;M.O escalera x unidad;0.05
+ESTRUCTURA;ESTN - M.O Losa aligerada de 0.40 m a 0.70 m con torta superior de 0.06 m a 0.10m;0.15
+ESTRUCTURA;ESTN - M.O Losa Aerea Maciza e= 0.15 m;0.1
+ESTRUCTURA;ESTN - M.O Losa Aerea Maciza e= 0.15 m;0.1
+ESTRUCTURA;ESTN - M.O Losa Maciza e=0.10 m;0.15
+ESTRUCTURA;ESTN - M.O Instalación de acero - Estructura;0.25
+ESTRUCTURA;ESTN - M.O Instalacion malla electrosoldada - Estructura;
+ESTRUCTURA;ESTN - M.O muros en concreto;0.1
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Anclaje Epoxico;0.15
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Grouting;0.15
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Muro Bloque Cemento Interno 10x20x40;0.1
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Muro Bloque Cemento Interno 15x20x40;0.1
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Muro Ladrillo Interno 10x20x40;0.08
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Muro Ladrillo Interno 12x20x40;0.08
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Muro Ladrillo Interno 20x20x40;0.08
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Revoques Muros Fachada;0.08
+MAMPOSTERIA Y PAÑETES;ESTN - M.O Revoques Muros Internos;0.08
+MAMPOSTERIA Y PAÑETES;ESTN - Muro fachada en ladrillo a la vista esp=15 cm;0.08
+ENCHAPES Y PISOS;ESTN - M.O Colocación de Mortero en Piso e = 0,05 m;0.2
+ENCHAPES Y PISOS;ESTN - M.O Enchape Ceramico de 19x19 cm hasta 61x61 cm;0.3
+ENCHAPES Y PISOS;ESTN - M.O Zocalo en Ceramica entre h= 8 cm a 15 cm;0.05
+ENCHAPES Y PISOS;ESTN - M.O Colocación Enchape Porcelanato desde 30 x 60 hasta 60 x 60;0.1
+ENCHAPES Y PISOS;ESTN - M.O Colocación de Mortero Impermeable Baños e= 0.5 m;
+ENCHAPES Y PISOS;ESTN - M.O Colocación Tableta Gres 7x 25 cm;0.1
+ENCHAPES Y PISOS;ESTN - M.O Zócalo Tipo Gres entre h= 8 cm a 15 cm;0.025
+ENCHAPES Y PISOS;ESTN - M.O Zocalo en Porcelanato h= 8 cm a 15 cm;0.025
+ENCHAPES Y PISOS;ESTN - M.O Revoques Muros Internos Enchape ducha;0.1
+ENCHAPES Y PISOS;ESTN - M.O Colocación de Mortero en Piso e = 0,05 m - 0.08 M;0.05
+ENCHAPES Y PISOS;ESTN - M.O Colocación de Mortero Impermeable Baños e= 0.05 m - 0.08 M;0.05
+ENCHAPES Y PISOS;ESTN - M.O Enchape Ceramico hasta 18.9 x 18.9 cm;
+ESTUCO Y PINTURA;ESTN - Estuco sobre Revoque Muro (Interiores);0.1
+ESTUCO Y PINTURA;ESTN - Pintura Graniplas sobre Muros Internos;0.15
+ESTUCO Y PINTURA;ESTN - Vinilo 3 manos Muros externos;0.2
+ESTUCO Y PINTURA;ESTN - Argamasa Sobre Muro (Interiores);0.1
+ESTUCO Y PINTURA;ESTN - Estuco sobre Revoque Muro (Exteriores);0.05
+ESTUCO Y PINTURA;ESTN - Pintura Graniplas sobre Muros Fachada;0.15
+ESTUCO Y PINTURA;ESTN - Vinilo 3 manos Muros Internos;0.2
+ESTUCO Y PINTURA;ESTN - Argamasa Sobre Muro (Exteriores);0.05
+;;
