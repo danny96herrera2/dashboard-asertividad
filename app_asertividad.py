@@ -150,6 +150,9 @@ if es_ascensor:
 # ==========================================
 # 5. PANEL DE PONDERACIONES (PESOS) CON AUTOCARGA
 # ==========================================
+# ==========================================
+# 5. PANEL DE PONDERACIONES (PESOS) CON AUTOCARGA
+# ==========================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚖️ **Ponderación de Asertividad**")
 usar_pesos = st.sidebar.toggle("Activar Pesos Ponderados", value=True)
@@ -160,45 +163,48 @@ if usar_pesos:
         st.markdown("Valores cargados por defecto. Puedes modificarlos manualmente aquí si lo necesitas:")
         df_config_pesos = df_filtrado[['GRUPO', 'ACTIVIDAD']].drop_duplicates().reset_index(drop=True)
         
-        # Pesos matemáticos base por si no hay archivo
-        df_config_pesos['Peso Grupo (%)'] = 100.0 / df_config_pesos['GRUPO'].nunique() if not df_config_pesos.empty else 100.0
-        df_config_pesos['Peso Actividad (%)'] = df_config_pesos.groupby('GRUPO')['ACTIVIDAD'].transform(lambda x: 100.0 / len(x))
-        
-        # MAGIA: Intentar leer el archivo de pesos si existe en GitHub
-        if os.path.exists("pesos.csv"):
-            try:
-                df_pesos_csv = pd.read_csv("pesos.csv", sep=None, engine='python', encoding='utf-8-sig')
-                df_pesos_csv.columns = df_pesos_csv.columns.astype(str).str.strip().str.upper()
-                
-                if 'GRUPO' in df_pesos_csv.columns:
-                    # Detectar automáticamente la columna de los valores numéricos
-                    col_peso_csv = [c for c in df_pesos_csv.columns if c not in ['GRUPO', 'ACTIVIDAD'] and not c.startswith('UNNAMED')][0]
+        if not df_config_pesos.empty:
+            # Pesos matemáticos base por si no hay archivo
+            total_grupos = df_config_pesos['GRUPO'].nunique()
+            df_config_pesos['Peso Grupo (%)'] = 100.0 / total_grupos if total_grupos > 0 else 100.0
+            df_config_pesos['Peso Actividad (%)'] = df_config_pesos.groupby('GRUPO')['ACTIVIDAD'].transform(lambda x: 100.0 / len(x) if len(x) > 0 else 100.0)
+            
+            # MAGIA: Intentar leer el archivo de pesos si existe
+            if os.path.exists("pesos.csv"):
+                try:
+                    df_pesos_csv = pd.read_csv("pesos.csv", sep=None, engine='python', encoding='utf-8-sig')
+                    df_pesos_csv.columns = df_pesos_csv.columns.astype(str).str.strip().str.upper()
                     
-                    df_pesos_csv['GRUPO'] = df_pesos_csv['GRUPO'].astype(str).str.strip().str.upper()
-                    df_pesos_csv['ACTIVIDAD'] = df_pesos_csv['ACTIVIDAD'].fillna('').astype(str).str.strip().str.upper()
-                    
-                    # 1. Regla Grupos: Si Actividad está vacía o es 'NAN'
-                    df_grupos = df_pesos_csv[df_pesos_csv['ACTIVIDAD'].isin(['', 'NAN', 'NONE'])]
-                    dict_grupos = dict(zip(df_grupos['GRUPO'], pd.to_numeric(df_grupos[col_peso_csv], errors='coerce').fillna(0)))
-                    
-                    # 2. Regla Actividades: Si Actividad tiene texto
-                    df_act = df_pesos_csv[~df_pesos_csv['ACTIVIDAD'].isin(['', 'NAN', 'NONE'])]
-                    dict_act = dict(zip(df_act['GRUPO'] + "||" + df_act['ACTIVIDAD'], pd.to_numeric(df_act[col_peso_csv], errors='coerce').fillna(0)))
-                    
-                    def mapear_grupo(g):
-                        return dict_grupos.get(str(g).strip().upper(), 100.0 / df_config_pesos['GRUPO'].nunique())
+                    if 'GRUPO' in df_pesos_csv.columns:
+                        col_peso_csv = [c for c in df_pesos_csv.columns if c not in ['GRUPO', 'ACTIVIDAD'] and not c.startswith('UNNAMED')][0]
                         
-                    def mapear_actividad(row):
-                        k = str(row['GRUPO']).strip().upper() + "||" + str(row['ACTIVIDAD']).strip().upper()
-                        return dict_act.get(k, 100.0 / len(df_config_pesos[df_config_pesos['GRUPO']==row['GRUPO']]))
+                        df_pesos_csv['GRUPO'] = df_pesos_csv['GRUPO'].astype(str).str.strip().str.upper()
+                        df_pesos_csv['ACTIVIDAD'] = df_pesos_csv['ACTIVIDAD'].fillna('').astype(str).str.strip().str.upper()
+                        
+                        df_grupos = df_pesos_csv[df_pesos_csv['ACTIVIDAD'].isin(['', 'NAN', 'NONE'])]
+                        dict_grupos = dict(zip(df_grupos['GRUPO'], pd.to_numeric(df_grupos[col_peso_csv], errors='coerce').fillna(0)))
+                        
+                        df_act = df_pesos_csv[~df_pesos_csv['ACTIVIDAD'].isin(['', 'NAN', 'NONE'])]
+                        dict_act = dict(zip(df_act['GRUPO'] + "||" + df_act['ACTIVIDAD'], pd.to_numeric(df_act[col_peso_csv], errors='coerce').fillna(0)))
+                        
+                        def mapear_grupo(g):
+                            return dict_grupos.get(str(g).strip().upper(), 100.0 / total_grupos if total_grupos > 0 else 100.0)
+                            
+                        def mapear_actividad(row):
+                            k = str(row['GRUPO']).strip().upper() + "||" + str(row['ACTIVIDAD']).strip().upper()
+                            t_act = len(df_config_pesos[df_config_pesos['GRUPO']==row['GRUPO']])
+                            return dict_act.get(k, 100.0 / t_act if t_act > 0 else 100.0)
 
-                    df_config_pesos['Peso Grupo (%)'] = df_config_pesos['GRUPO'].apply(mapear_grupo)
-                    df_config_pesos['Peso Actividad (%)'] = df_config_pesos.apply(mapear_actividad, axis=1)
-                    
-            except Exception as e:
-                st.warning(f"⚠️ Se detectó 'pesos.csv' pero hubo un error al leerlo: {e}")
+                        df_config_pesos['Peso Grupo (%)'] = df_config_pesos['GRUPO'].apply(mapear_grupo)
+                        df_config_pesos['Peso Actividad (%)'] = df_config_pesos.apply(mapear_actividad, axis=1)
+                        
+                except Exception as e:
+                    st.warning(f"⚠️ Se detectó 'pesos.csv' pero hubo un error al leerlo: {e}")
 
         df_pesos_guardados = st.data_editor(df_config_pesos, hide_index=True, use_container_width=True)
+
+# ==========================================
+# 6. MOTOR ESTADÍSTICO Y EXCEPCIÓN ASCENSORES
 
 # ==========================================
 # 6. MOTOR ESTADÍSTICO Y EXCEPCIÓN ASCENSORES
