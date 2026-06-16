@@ -161,72 +161,71 @@ if usar_pesos:
         df_config_pesos = df_filtrado[['GRUPO', 'ACTIVIDAD']].drop_duplicates().reset_index(drop=True)
         
         if not df_config_pesos.empty:
-            # 1. Pesos matemáticos base por defecto
             total_grupos = df_config_pesos['GRUPO'].nunique()
             df_config_pesos['Peso Grupo (%)'] = 100.0 / total_grupos if total_grupos > 0 else 100.0
             df_config_pesos['Peso Actividad (%)'] = df_config_pesos.groupby('GRUPO')['ACTIVIDAD'].transform(lambda x: 100.0 / len(x) if len(x) > 0 else 100.0)
             
-            # 2. Intentar leer y cruzar el archivo de pesos
             if os.path.exists("pesos.csv"):
                 try:
                     df_pesos_csv = pd.read_csv("pesos.csv", sep=None, engine='python', encoding='utf-8-sig')
                     df_pesos_csv.columns = df_pesos_csv.columns.astype(str).str.strip().str.upper()
                     
                     if 'GRUPO' in df_pesos_csv.columns:
-                        # Identificar la columna de los valores numéricos
-                        col_peso_csv = [c for c in df_pesos_csv.columns if c not in ['GRUPO', 'ACTIVIDAD'] and not c.startswith('UNNAMED')][0]
+                        # Buscar la columna correcta de peso
+                        cols_numericas = [c for c in df_pesos_csv.columns if c not in ['GRUPO', 'ACTIVIDAD'] and not c.startswith('UNNAMED')]
+                        cols_peso = [c for c in cols_numericas if 'PESO' in c or '%' in c or 'VALOR' in c]
+                        col_peso_csv = cols_peso[0] if cols_peso else cols_numericas[-1]
                         
-                        # Limpiar los números (cambiar comas por puntos y quitar símbolos de %)
-                        df_pesos_csv[col_peso_csv] = df_pesos_csv[col_peso_csv].astype(str).str.replace(',', '.', regex=False).str.replace('%', '', regex=False)
+                        df_pesos_csv[col_peso_csv] = df_pesos_csv[col_peso_csv].astype(str).str.replace(',', '.', regex=False).str.replace('%', '', regex=False).str.strip()
                         df_pesos_csv[col_peso_csv] = pd.to_numeric(df_pesos_csv[col_peso_csv], errors='coerce')
                         
-                        # Función maestra para igualar textos en ambas tablas
                         def limpiar_texto(t):
-                            if pd.isna(t) or str(t).strip().upper() in ['NAN', 'NONE', '']: 
-                                return ""
+                            if pd.isna(t) or str(t).strip().upper() in ['NAN', 'NONE', '']: return ""
                             t = str(t).strip().upper()
-                            reemplazos = {'Á':'A', 'É':'E', 'Í':'I', 'Ó':'O', 'Ú':'U', 'Ä':'A', 'Ë':'E', 'Ï':'I', 'Ö':'O', 'Ü':'U'}
-                            for a, b in reemplazos.items():
-                                t = t.replace(a, b)
+                            reemplazos = {'Á':'A', 'É':'E', 'Í':'I', 'Ó':'O', 'Ú':'U'}
+                            for a, b in reemplazos.items(): t = t.replace(a, b)
                             return t
 
-                        # Aplicamos la limpieza AL CSV
-                        df_pesos_csv['GRUPO_CLEAN'] = df_pesos_csv['GRUPO'].apply(limpiar_texto)
-                        df_pesos_csv['ACTIVIDAD_CLEAN'] = df_pesos_csv['ACTIVIDAD'].apply(limpiar_texto)
+                        df_pesos_csv['G_CLN'] = df_pesos_csv['GRUPO'].apply(limpiar_texto)
+                        df_pesos_csv['A_CLN'] = df_pesos_csv.get('ACTIVIDAD', pd.Series(dtype=str)).apply(limpiar_texto)
                         
-                        # Aplicamos la misma limpieza A TU BASE DE DATOS
-                        df_config_pesos['GRUPO_CLEAN'] = df_config_pesos['GRUPO'].apply(limpiar_texto)
-                        df_config_pesos['ACTIVIDAD_CLEAN'] = df_config_pesos['ACTIVIDAD'].apply(limpiar_texto)
+                        df_config_pesos['G_CLN'] = df_config_pesos['GRUPO'].apply(limpiar_texto)
+                        df_config_pesos['A_CLN'] = df_config_pesos['ACTIVIDAD'].apply(limpiar_texto)
 
-                        # Separar la información del CSV
-                        df_grupos_csv = df_pesos_csv[df_pesos_csv['ACTIVIDAD_CLEAN'] == '']
-                        dict_grupos = dict(zip(df_grupos_csv['GRUPO_CLEAN'], df_grupos_csv[col_peso_csv]))
+                        df_g_csv = df_pesos_csv[df_pesos_csv['A_CLN'] == '']
+                        dict_g = dict(zip(df_g_csv['G_CLN'], df_g_csv[col_peso_csv]))
                         
-                        df_act_csv = df_pesos_csv[df_pesos_csv['ACTIVIDAD_CLEAN'] != '']
-                        dict_act = dict(zip(df_act_csv['GRUPO_CLEAN'] + "||" + df_act_csv['ACTIVIDAD_CLEAN'], df_act_csv[col_peso_csv]))
+                        df_a_csv = df_pesos_csv[df_pesos_csv['A_CLN'] != '']
+                        dict_a = dict(zip(df_a_csv['G_CLN'] + "||" + df_a_csv['A_CLN'], df_a_csv[col_peso_csv]))
                         
-                        # Extraer los valores cruzados
                         def cruzar_grupo(row):
-                            val = dict_grupos.get(row['GRUPO_CLEAN'])
-                            return val if pd.notna(val) else row['Peso Grupo (%)']
+                            g = row['G_CLN']
+                            if g in dict_g: return dict_g[g]
+                            for k, v in dict_g.items():
+                                if k in g or g in k: return v
+                            return row['Peso Grupo (%)']
                             
                         def cruzar_actividad(row):
-                            k = row['GRUPO_CLEAN'] + "||" + row['ACTIVIDAD_CLEAN']
-                            val = dict_act.get(k)
-                            return val if pd.notna(val) else row['Peso Actividad (%)']
+                            g, a = row['G_CLN'], row['A_CLN']
+                            k_exacta = f"{g}||{a}"
+                            if k_exacta in dict_a: return dict_a[k_exacta]
+                            for k, v in dict_a.items():
+                                if g in k and (a in k or k in a): return v
+                            return row['Peso Actividad (%)']
 
                         df_config_pesos['Peso Grupo (%)'] = df_config_pesos.apply(cruzar_grupo, axis=1)
                         df_config_pesos['Peso Actividad (%)'] = df_config_pesos.apply(cruzar_actividad, axis=1)
+                        df_config_pesos = df_config_pesos.drop(columns=['G_CLN', 'A_CLN'])
                         
-                        # Borramos las columnas temporales de limpieza para que la tabla se vea estética
-                        df_config_pesos = df_config_pesos.drop(columns=['GRUPO_CLEAN', 'ACTIVIDAD_CLEAN'])
+                        st.sidebar.success(f"✅ Pesos cargados usando la columna: {col_peso_csv}")
                         
-                        st.sidebar.success("✅ Pesos sincronizados correctamente.")
-                        
+                        # MODO DEPURACIÓN: Mostrar qué está leyendo realmente
+                        with st.sidebar.expander("🔍 Ver qué leyó Python del CSV"):
+                            st.dataframe(df_pesos_csv[['GRUPO', 'ACTIVIDAD', col_peso_csv]].dropna(subset=[col_peso_csv]))
+                            
                 except Exception as e:
                     st.sidebar.error(f"❌ Error al procesar pesos.csv: {e}")
-                    if 'GRUPO_CLEAN' in df_config_pesos.columns:
-                        df_config_pesos = df_config_pesos.drop(columns=['GRUPO_CLEAN', 'ACTIVIDAD_CLEAN'])
+                    if 'G_CLN' in df_config_pesos.columns: df_config_pesos = df_config_pesos.drop(columns=['G_CLN', 'A_CLN'])
             else:
                 st.sidebar.warning("⚠️ Archivo 'pesos.csv' no encontrado en GitHub.")
 
