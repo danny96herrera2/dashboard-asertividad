@@ -2,6 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+import tempfile
+
+try:
+    from fpdf import FPDF
+except ImportError:
+    FPDF = None
 
 # ==========================================
 # 1. CONFIGURACIÓN Y ESTÉTICA DE LA PÁGINA
@@ -75,9 +81,6 @@ def cargar_y_procesar_base(ruta_archivo):
 
     return df, "OK"
 
-# ==========================================
-# 3. DETECCIÓN AUTOMÁTICA DEL ARCHIVO RESIDENTE
-# ==========================================
 archivo_residente = None
 if os.path.exists("base_datos.xlsx"):
     archivo_residente = "base_datos.xlsx"
@@ -85,10 +88,10 @@ elif os.path.exists("base_datos.csv"):
     archivo_residente = "base_datos.csv"
 
 if archivo_residente is None:
-    st.info("👋 **¡Bienvenido al sistema corporativo!**\n\nPara activar el Dashboard, sube tu archivo consolidado a GitHub renombrado exactamente como **`base_datos.xlsx`**.")
+    st.info("👋 **¡Bienvenido al sistema corporativo!**\n\nSube tu archivo consolidado a GitHub renombrado exactamente como **`base_datos.xlsx`**.")
     st.stop()
 
-with st.spinner("🚀 Sincronizando Base de Datos de Producción..."):
+with st.spinner("🚀 Sincronizando Base de Datos..."):
     df, mensaje = cargar_y_procesar_base(archivo_residente)
     
 if mensaje != "OK":
@@ -96,17 +99,22 @@ if mensaje != "OK":
     st.stop()
 
 # ==========================================
-# 4. FILTROS EN CASCADA GLOBAL
+# 3. FILTROS EN CASCADA GLOBAL (Lógica de Año Corregida)
 # ==========================================
 st.sidebar.header("🔍 Panel de Filtros Globales")
 
 años_construccion = sorted([int(x) for x in df[(df['FASE DEL PRECIO'] == 'Contratado') & (df['AÑO_FECHA'].notna())]['AÑO_FECHA'].unique()])
-año_seleccionado = st.sidebar.multiselect("📅 Año de Construcción", options=años_construccion, help="Filtra proyectos construidos este año y trae su historial previo.")
+año_seleccionado = st.sidebar.multiselect("📅 Año de Construcción", options=años_construccion, help="Filtra estrictamente las actividades que fueron contratadas en este año.")
 
 df_base = df.copy()
 if año_seleccionado:
-    proyectos_del_año = df[(df['FASE DEL PRECIO'] == 'Contratado') & (df['AÑO_FECHA'].isin(año_seleccionado))]['PROYECTO'].unique()
-    df_base = df_base[df_base['PROYECTO'].isin(proyectos_del_año)]
+    # Nuevo filtro estricto por actividad y año
+    df_contratados = df[(df['FASE DEL PRECIO'] == 'Contratado') & (df['AÑO_FECHA'].isin(año_seleccionado))]
+    df_contratados['LLAVE_AÑO'] = df_contratados['PROYECTO'].astype(str) + "||" + df_contratados['GRUPO'].astype(str) + "||" + df_contratados['ACTIVIDAD'].astype(str)
+    llaves_validas = df_contratados['LLAVE_AÑO'].unique()
+    
+    df_base['LLAVE_AÑO'] = df_base['PROYECTO'].astype(str) + "||" + df_base['GRUPO'].astype(str) + "||" + df_base['ACTIVIDAD'].astype(str)
+    df_base = df_base[df_base['LLAVE_AÑO'].isin(llaves_validas)].drop(columns=['LLAVE_AÑO'])
 
 lista_ciudades = sorted([str(x) for x in df_base.get('CIUDAD', pd.Series(dtype=str)).dropna().unique()])
 ciudad = st.sidebar.multiselect("📍 Filtrar por Ciudad", options=lista_ciudades)
@@ -148,7 +156,7 @@ if es_ascensor:
         simbolo_moneda = "USD $"
 
 # ==========================================
-# 5. PANEL DE PONDERACIONES (PESOS) CON AUTOCARGA
+# 4. PANEL DE PONDERACIONES (PESOS) 
 # ==========================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚖️ **Ponderación de Asertividad**")
@@ -156,10 +164,8 @@ usar_pesos = st.sidebar.toggle("Activar Pesos Ponderados", value=True)
 
 df_pesos_guardados = None
 if usar_pesos:
-    with st.expander("🛠️ Panel de Configuración de Pesos (%)", expanded=True):
-        st.markdown("Valores cargados desde el archivo de configuración:")
+    with st.expander("🛠️ Configuración de Pesos (%)", expanded=False):
         df_config_pesos = df_filtrado[['GRUPO', 'ACTIVIDAD']].drop_duplicates().reset_index(drop=True)
-        
         if not df_config_pesos.empty:
             total_grupos = df_config_pesos['GRUPO'].nunique()
             df_config_pesos['Peso Grupo (%)'] = 100.0 / total_grupos if total_grupos > 0 else 100.0
@@ -169,9 +175,7 @@ if usar_pesos:
                 try:
                     df_pesos_csv = pd.read_csv("pesos.csv", sep=None, engine='python', encoding='utf-8-sig')
                     df_pesos_csv.columns = df_pesos_csv.columns.astype(str).str.strip().str.upper()
-                    
                     if 'GRUPO' in df_pesos_csv.columns:
-                        # Buscar la columna correcta de peso
                         cols_numericas = [c for c in df_pesos_csv.columns if c not in ['GRUPO', 'ACTIVIDAD'] and not c.startswith('UNNAMED')]
                         cols_peso = [c for c in cols_numericas if 'PESO' in c or '%' in c or 'VALOR' in c]
                         col_peso_csv = cols_peso[0] if cols_peso else cols_numericas[-1]
@@ -188,13 +192,11 @@ if usar_pesos:
 
                         df_pesos_csv['G_CLN'] = df_pesos_csv['GRUPO'].apply(limpiar_texto)
                         df_pesos_csv['A_CLN'] = df_pesos_csv.get('ACTIVIDAD', pd.Series(dtype=str)).apply(limpiar_texto)
-                        
                         df_config_pesos['G_CLN'] = df_config_pesos['GRUPO'].apply(limpiar_texto)
                         df_config_pesos['A_CLN'] = df_config_pesos['ACTIVIDAD'].apply(limpiar_texto)
 
                         df_g_csv = df_pesos_csv[df_pesos_csv['A_CLN'] == '']
                         dict_g = dict(zip(df_g_csv['G_CLN'], df_g_csv[col_peso_csv]))
-                        
                         df_a_csv = df_pesos_csv[df_pesos_csv['A_CLN'] != '']
                         dict_a = dict(zip(df_a_csv['G_CLN'] + "||" + df_a_csv['A_CLN'], df_a_csv[col_peso_csv]))
                         
@@ -217,22 +219,12 @@ if usar_pesos:
                         df_config_pesos['Peso Actividad (%)'] = df_config_pesos.apply(cruzar_actividad, axis=1)
                         df_config_pesos = df_config_pesos.drop(columns=['G_CLN', 'A_CLN'])
                         
-                        st.sidebar.success(f"✅ Pesos cargados usando la columna: {col_peso_csv}")
-                        
-                        # MODO DEPURACIÓN: Mostrar qué está leyendo realmente
-                        with st.sidebar.expander("🔍 Ver qué leyó Python del CSV"):
-                            st.dataframe(df_pesos_csv[['GRUPO', 'ACTIVIDAD', col_peso_csv]].dropna(subset=[col_peso_csv]))
-                            
-                except Exception as e:
-                    st.sidebar.error(f"❌ Error al procesar pesos.csv: {e}")
-                    if 'G_CLN' in df_config_pesos.columns: df_config_pesos = df_config_pesos.drop(columns=['G_CLN', 'A_CLN'])
-            else:
-                st.sidebar.warning("⚠️ Archivo 'pesos.csv' no encontrado en GitHub.")
-
+                except Exception:
+                    pass
         df_pesos_guardados = st.data_editor(df_config_pesos, hide_index=True, use_container_width=True)
 
 # ==========================================
-# 6. MOTOR ESTADÍSTICO Y EXCEPCIÓN ASCENSORES
+# 5. MOTOR ESTADÍSTICO
 # ==========================================
 if not df_filtrado.empty and col_valor in df_filtrado.columns:
     cols_agrupacion = [c for c in ['CIUDAD', 'PROYECTO', 'GRUPO', 'ACTIVIDAD'] if c in df.columns]
@@ -242,13 +234,11 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
     df_asc = df_filtrado[mask_ascensor].copy()
     df_resto = df_filtrado[~mask_ascensor].copy()
 
-    pivotes = []
-    desc_list = []
+    pivotes, desc_list = [], []
 
     if not df_resto.empty:
         piv_resto = df_resto.pivot_table(index=cols_agrupacion, columns='FASE DEL PRECIO', values=col_valor, aggfunc='mean').reset_index()
         pivotes.append(piv_resto)
-        
         desc_resto = df_resto[df_resto['FASE DEL PRECIO'] == 'Contratado'].drop_duplicates(subset=cols_agrupacion)[cols_agrupacion + cols_extras]
         desc_list.append(desc_resto)
         
@@ -256,7 +246,6 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
         df_asc['ACTIVIDAD'] = 'ASCENSOR (SUMA SUMINISTRO + INSTALACIÓN)'
         piv_asc = df_asc.pivot_table(index=cols_agrupacion, columns='FASE DEL PRECIO', values=col_valor, aggfunc='sum').reset_index()
         pivotes.append(piv_asc)
-
         desc_asc = df_asc[df_asc['FASE DEL PRECIO'] == 'Contratado'].drop_duplicates(subset=cols_agrupacion)[cols_agrupacion + cols_extras]
         desc_list.append(desc_asc)
 
@@ -280,22 +269,19 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
     colores_marca = {'Analizado': '#FFC112', 'Presupuestado': '#223983', 'Contratado': '#00A54C'}
 
     # ==========================================
-    # 7. CREACIÓN DE LAS 4 PESTAÑAS
+    # 6. CREACIÓN DE LAS PESTAÑAS Y TARJETAS
     # ==========================================
     tab_main, tab_grupos, tab_actividad, tab_audit = st.tabs(["📊 Dashboard Principal", "📁 Resumen por Grupo", "🛠️ Resumen por Actividad", "🚨 Auditoría"])
 
-    # ------------------------------------------
-    # PESTAÑA 1: DASHBOARD DE PROYECTOS
-    # ------------------------------------------
     with tab_main:
         if df_completos.empty:
             st.warning("⚠️ No hay ítems con el ciclo de 3 fases completado para los filtros seleccionados.")
         else:
-            st.subheader("🖱️ Panel de Control por Proyecto")
             df_resumen = df_completos.groupby('PROYECTO')[['Analizado', 'Presupuestado', 'Contratado']].mean().reset_index()
-            df_mostrar_resumen = df_resumen.rename(columns={'Analizado': 'Precio Analizado PYC', 'Presupuestado': 'Pre-Construcción', 'Contratado': 'Construcción'})
+            # Renombramos para la tabla interactiva
+            df_mostrar_resumen = df_resumen.rename(columns={'Analizado': 'Precio Analizado PYC', 'Presupuestado': 'Presupuesto', 'Contratado': 'Contratado'})
             
-            for col in ['Precio Analizado PYC', 'Pre-Construcción', 'Construcción']:
+            for col in ['Precio Analizado PYC', 'Presupuesto', 'Contratado']:
                 df_mostrar_resumen[col] = df_mostrar_resumen[col].apply(lambda x: f"{simbolo_moneda}{x:,.0f}")
 
             try:
@@ -311,45 +297,85 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             df_tab1['Δ Con vs Pre'] = ((df_tab1['Contratado'] - df_tab1['Presupuestado']) / df_tab1['Presupuestado'])
             df_tab1['Δ Con vs Ana'] = ((df_tab1['Contratado'] - df_tab1['Analizado']) / df_tab1['Analizado'])
 
+            # LÓGICA DE COLORES INVERTIDA (Negativo Verde, Positivo Rojo, Cero Amarillo)
             def kpi(val):
                 if pd.isna(val): return "<div class='kpi-value' style='color:#8a98ac;'>N/A</div>"
                 val = val * 100
-                c = "#00A54C" if abs(val) <= 5 else ("#FFC112" if abs(val) <= 15 else "#e63946") 
+                c = "#00A54C" if val < 0 else ("#e63946" if val > 0 else "#FFC112")
                 return f"<div class='kpi-value' style='color:{c};'>{'+' if val>0 else ''}{val:.2f}%</div>"
 
+            # PANEL GLOBAL PONDERADO
+            st.markdown("### 🏆 Indicadores de Variaciones")
             if usar_pesos and 'Peso Grupo (%)' in df_tab1.columns:
-                st.markdown("### 🏆 Asertividad Global Ponderada (Var * %Grupo * %Actividad)")
                 k_w1, k_w2, k_w3 = st.columns(3)
-                
                 df_tab1['W_Ana_Pre'] = df_tab1['Δ Pre vs Ana'] * (df_tab1['Peso Grupo (%)']/100) * (df_tab1['Peso Actividad (%)']/100)
                 df_tab1['W_Con_Pre'] = df_tab1['Δ Con vs Pre'] * (df_tab1['Peso Grupo (%)']/100) * (df_tab1['Peso Actividad (%)']/100)
                 df_tab1['W_Con_Ana'] = df_tab1['Δ Con vs Ana'] * (df_tab1['Peso Grupo (%)']/100) * (df_tab1['Peso Actividad (%)']/100)
                 
-                k_w1.markdown(f'<div class="kpi-card border-purple"><div class="kpi-title">Planeación Ponderada</div>{kpi(df_tab1["W_Ana_Pre"].sum())}</div>', unsafe_allow_html=True)
-                k_w2.markdown(f'<div class="kpi-card border-purple"><div class="kpi-title">Financiero Ponderado</div>{kpi(df_tab1["W_Con_Pre"].sum())}</div>', unsafe_allow_html=True)
-                k_w3.markdown(f'<div class="kpi-card border-purple"><div class="kpi-title">Efectividad Ponderada</div>{kpi(df_tab1["W_Con_Ana"].sum())}</div>', unsafe_allow_html=True)
-                st.markdown("---")
+                v_pre_ana_w = df_tab1["W_Ana_Pre"].sum()
+                v_con_pre_w = df_tab1["W_Con_Pre"].sum()
+                v_con_ana_w = df_tab1["W_Con_Ana"].sum()
 
+                k_w1.markdown(f'<div class="kpi-card border-purple"><div class="kpi-title">% Presupuesto vs Analizado (Ponderado)</div>{kpi(v_pre_ana_w)}</div>', unsafe_allow_html=True)
+                k_w2.markdown(f'<div class="kpi-card border-purple"><div class="kpi-title">% Contratado vs Presupuesto (Ponderado)</div>{kpi(v_con_pre_w)}</div>', unsafe_allow_html=True)
+                k_w3.markdown(f'<div class="kpi-card border-purple"><div class="kpi-title">% Contratado vs Analizado (Ponderado)</div>{kpi(v_con_ana_w)}</div>', unsafe_allow_html=True)
+                
             prom_ana, prom_pre, prom_con = df_tab1['Analizado'].mean(), df_tab1['Presupuestado'].mean(), df_tab1['Contratado'].mean()
-            v_pre_ana = ((prom_pre - prom_ana) / prom_ana) if prom_ana else None
-            v_con_pre = ((prom_con - prom_pre) / prom_pre) if prom_pre else None
-            v_con_ana = ((prom_con - prom_ana) / prom_ana) if prom_ana else None
+            v_pre_ana = ((prom_pre - prom_ana) / prom_ana) if prom_ana else 0
+            v_con_pre = ((prom_con - prom_pre) / prom_pre) if prom_pre else 0
+            v_con_ana = ((prom_con - prom_ana) / prom_ana) if prom_ana else 0
 
-            st.markdown("### Promedios Globales (Sin Ponderar)")
+            # GENERACIÓN DEL REPORTE EJECUTIVO Y PDF
+            st.markdown("---")
+            val_txt_pre_ana = v_pre_ana_w if usar_pesos else v_pre_ana
+            val_txt_con_pre = v_con_pre_w if usar_pesos else v_con_pre
+            val_txt_con_ana = v_con_ana_w if usar_pesos else v_con_ana
+            
+            texto_resumen = f"En el análisis global, el indicador de Presupuesto vs Analizado muestra una variación del {val_txt_pre_ana*100:.2f}%. Por otro lado, la transición de Contratado vs Presupuesto refleja un impacto del {val_txt_con_pre*100:.2f}%. Finalmente, el desfase total (Contratado vs Analizado) se consolida en {val_txt_con_ana*100:.2f}%. Estos resultados indican una tendencia general {'favorable (ahorros)' if val_txt_con_ana < 0 else 'desfavorable (sobrecostos)'} frente a las estimaciones iniciales."
+            
+            st.info(f"📝 **Resumen Ejecutivo:**\n\n{texto_resumen}")
+
+            if FPDF is not None:
+                def crear_pdf():
+                    pdf = FPDF()
+                    pdf.add_page()
+                    pdf.set_font("Arial", 'B', 16)
+                    pdf.cell(0, 10, "Informe Ejecutivo de Asertividad de Precios", ln=True, align='C')
+                    pdf.ln(10)
+                    pdf.set_font("Arial", '', 12)
+                    pdf.multi_cell(0, 8, texto_resumen.encode('latin-1', 'replace').decode('latin-1'))
+                    pdf.ln(10)
+                    pdf.set_font("Arial", 'B', 12)
+                    pdf.cell(0, 10, f"% Presupuesto vs Analizado: {val_txt_pre_ana*100:.2f}%", ln=True)
+                    pdf.cell(0, 10, f"% Contratado vs Presupuesto: {val_txt_con_pre*100:.2f}%", ln=True)
+                    pdf.cell(0, 10, f"% Contratado vs Analizado: {val_txt_con_ana*100:.2f}%", ln=True)
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                        pdf.output(tmp.name)
+                        with open(tmp.name, "rb") as f:
+                            return f.read()
+                
+                pdf_bytes = crear_pdf()
+                st.download_button(label="📥 Descargar Informe en PDF", data=pdf_bytes, file_name="Reporte_Asertividad.pdf", mime="application/pdf")
+            else:
+                st.warning("⚠️ El módulo de PDF no está instalado. Agrega `fpdf` a tu archivo `requirements.txt` en GitHub para habilitar la descarga.")
+
+            st.markdown("---")
+            # PANEL GLOBAL SIN PONDERAR
+            st.markdown("### 📊 Promedios Globales (Sin Ponderar)")
             k1, k2, k3 = st.columns(3)
-            k1.markdown(f'<div class="kpi-card border-blue"><div class="kpi-title">Planeación (Pre-Const. vs Analizado)</div>{kpi(v_pre_ana)}</div>', unsafe_allow_html=True)
-            k2.markdown(f'<div class="kpi-card border-green"><div class="kpi-title">Financiero (Construcción vs Pre-Const.)</div>{kpi(v_con_pre)}</div>', unsafe_allow_html=True)
-            k3.markdown(f'<div class="kpi-card border-yellow"><div class="kpi-title">Efectividad Total (Const. vs Analizado)</div>{kpi(v_con_ana)}</div>', unsafe_allow_html=True)
+            k1.markdown(f'<div class="kpi-card border-blue"><div class="kpi-title">% Presupuesto vs Analizado</div>{kpi(v_pre_ana)}</div>', unsafe_allow_html=True)
+            k2.markdown(f'<div class="kpi-card border-green"><div class="kpi-title">% Contratado vs Presupuesto</div>{kpi(v_con_pre)}</div>', unsafe_allow_html=True)
+            k3.markdown(f'<div class="kpi-card border-yellow"><div class="kpi-title">% Contratado vs Analizado</div>{kpi(v_con_ana)}</div>', unsafe_allow_html=True)
 
             st.subheader("📊 Comparativa Consolidada de Fases por Proyecto")
             df_graf = df_tab1.groupby('PROYECTO')[['Analizado', 'Presupuestado', 'Contratado']].mean().reset_index()
-            df_melted = df_graf.melt(id_vars='PROYECTO', value_vars=['Analizado', 'Presupuestado', 'Contratado'], var_name='Fase', value_name='Valor Promedio')
+            df_graf = df_graf.rename(columns={'Presupuestado': 'Presupuesto'})
+            df_melted = df_graf.melt(id_vars='PROYECTO', value_vars=['Analizado', 'Presupuesto', 'Contratado'], var_name='Fase', value_name='Valor Promedio')
             
             fig1 = px.bar(df_melted, x='PROYECTO', y='Valor Promedio', color='Fase', barmode='group', text='Valor Promedio', color_discrete_map=colores_marca)
             fig1.update_traces(texttemplate=f'<b>{simbolo_moneda} %{{y:,.0f}}</b>', textposition='inside', textangle=-90, insidetextanchor='middle', hovertemplate=f'<b>Proyecto:</b> %{{x}}<br><b>Fase:</b> %{{data.name}}<br><b>Valor:</b> {simbolo_moneda} %{{y:,.0f}}<extra></extra>')
-            fig1.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="bottom", y=1.1, xanchor="right", x=1, title=""), xaxis_title="", yaxis_title=f"Inversión Promedio ({simbolo_moneda})", margin=dict(t=50, l=0, r=0, b=0), font=dict(family="Segoe UI", size=13, color="#4a5568"), uniformtext_minsize=10, uniformtext_mode='hide')
+            fig1.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="bottom", y=1.1, xanchor="right", x=1, title=""), xaxis_title="", yaxis_title=f"Inversión Promedio ({simbolo_moneda})", margin=dict(t=50, l=0, r=0, b=0))
             fig1.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f2f6')
-            fig1.update_xaxes(showgrid=False)
             st.plotly_chart(fig1, use_container_width=True)
 
             st.subheader("📋 Matriz Detallada")
@@ -359,9 +385,9 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
 
             def aplicar_color_semaforo(val):
                 if pd.isna(val): return ''
-                if -5 <= val <= 5: return 'background-color: #d4edda; color: #155724; font-weight: bold;'
-                elif -15 <= val < -5 or 5 < val <= 15: return 'background-color: #fff3cd; color: #856404; font-weight: bold;'
-                else: return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+                if val < 0: return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+                elif val > 0: return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+                else: return 'background-color: #fff3cd; color: #856404; font-weight: bold;'
 
             columnas_porcentaje = ['Δ Presup. vs Analiz. (%)', 'Δ Contrat. vs Presup. (%)', 'Δ Contrat. vs Analiz. (%)']
             formatos = {col: lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A" for col in columnas_porcentaje}
@@ -369,12 +395,17 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             for col in ['Analizado', 'Presupuestado', 'Contratado']:
                 formatos[col] = lambda x: f"{simbolo_moneda}{x:,.0f}" if pd.notna(x) else "N/A"
 
-            df_mostrar_det = df_tab1.rename(columns={'Analizado': 'Precio Analizado PYC', 'Presupuestado': 'Pre-Construcción', 'Contratado': 'Construcción'})
+            df_mostrar_det = df_tab1.rename(columns={'Analizado': 'Precio Analizado PYC', 'Presupuestado': 'Presupuesto', 'Contratado': 'Contratado'})
             formatos['Precio Analizado PYC'] = formatos.pop('Analizado')
-            formatos['Pre-Construcción'] = formatos.pop('Presupuestado')
-            formatos['Construcción'] = formatos.pop('Contratado')
+            formatos['Presupuesto'] = formatos.pop('Presupuestado')
+            formatos['Contratado'] = formatos.pop('Contratado')
 
-            columnas_ordenadas = cols_agrupacion + ['Precio Analizado PYC', 'Pre-Construcción', 'Construcción'] + columnas_porcentaje + [c for c in cols_extras if c in df_mostrar_det.columns]
+            columnas_ordenadas = cols_agrupacion + ['Precio Analizado PYC', 'Presupuesto', 'Contratado'] + columnas_porcentaje + [c for c in cols_extras if c in df_mostrar_det.columns]
+            
+            # Formato TRM sin decimales y con signo
+            if 'TRM(DIA DE CONTRATO /COTIZACION)' in columnas_ordenadas:
+                formatos['TRM(DIA DE CONTRATO /COTIZACION)'] = lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A"
+
             st.dataframe(df_mostrar_det[columnas_ordenadas].style.map(aplicar_color_semaforo, subset=columnas_porcentaje).format(formatos), use_container_width=True, hide_index=True, height=450)
 
     # ------------------------------------------
@@ -387,7 +418,7 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             
             def mini_kpi(val):
                 if pd.isna(val): return "<span style='color:#6c757d;'>N/A</span>"
-                c = "#00A54C" if abs(val) <= 5 else ("#FFC112" if abs(val) <= 15 else "#e63946")
+                c = "#00A54C" if val < 0 else ("#e63946" if val > 0 else "#FFC112")
                 return f"<span style='color:{c};'>{'+' if val>0 else ''}{val:.2f}%</span>"
 
             for i in range(0, len(grupos_unicos), 2):
@@ -410,12 +441,12 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
                             st.markdown(html_tarjeta, unsafe_allow_html=True)
                             
                             df_graf_g = df_grp.groupby('PROYECTO')[['Analizado', 'Presupuestado', 'Contratado']].mean().reset_index()
-                            df_melt_g = df_graf_g.melt(id_vars='PROYECTO', value_vars=['Analizado', 'Presupuestado', 'Contratado'], var_name='Fase', value_name='Valor')
-                            fig = px.bar(df_melt_g, x='PROYECTO', y='Valor', color='Fase', barmode='group', color_discrete_map=colores_marca)
-                            fig.update_traces(hovertemplate=f'<b>Proyecto:</b> %{{x}}<br><b>Fase:</b> %{{data.name}}<br><b>Valor:</b> {simbolo_moneda} %{{y:,.0f}}<extra></extra>')
-                            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title=""), xaxis_title="PROYECTO", yaxis_title="", margin=dict(t=10, l=0, r=0, b=0), font=dict(family="Segoe UI", size=11, color="#4a5568"))
+                            df_graf_g = df_graf_g.rename(columns={'Presupuestado': 'Presupuesto'})
+                            df_melt_g = df_graf_g.melt(id_vars='PROYECTO', value_vars=['Analizado', 'Presupuesto', 'Contratado'], var_name='Fase', value_name='Valor')
+                            fig = px.bar(df_melt_g, x='PROYECTO', y='Valor', color='Fase', barmode='group', text='Valor', color_discrete_map=colores_marca)
+                            fig.update_traces(texttemplate=f'<b>{simbolo_moneda} %{{y:,.0f}}</b>', textposition='inside', textangle=-90, insidetextanchor='middle', hovertemplate=f'<b>Proyecto:</b> %{{x}}<br><b>Fase:</b> %{{data.name}}<br><b>Valor:</b> {simbolo_moneda} %{{y:,.0f}}<extra></extra>')
+                            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title=""), xaxis_title="PROYECTO", yaxis_title="", margin=dict(t=10, l=0, r=0, b=0))
                             fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f2f6', showticklabels=False)
-                            fig.update_xaxes(showgrid=False)
                             st.plotly_chart(fig, use_container_width=True, key=f"graf_g_{grupo}_{i+j}")
 
     # ------------------------------------------
@@ -446,12 +477,12 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
                             st.markdown(html_tarjeta, unsafe_allow_html=True)
                             
                             df_graf_act = df_act.groupby('PROYECTO')[['Analizado', 'Presupuestado', 'Contratado']].mean().reset_index()
-                            df_melt_act = df_graf_act.melt(id_vars='PROYECTO', value_vars=['Analizado', 'Presupuestado', 'Contratado'], var_name='Fase', value_name='Valor')
-                            fig2 = px.bar(df_melt_act, x='PROYECTO', y='Valor', color='Fase', barmode='group', color_discrete_map=colores_marca)
-                            fig2.update_traces(hovertemplate=f'<b>Proyecto:</b> %{{x}}<br><b>Fase:</b> %{{data.name}}<br><b>Valor:</b> {simbolo_moneda} %{{y:,.0f}}<extra></extra>')
-                            fig2.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title=""), xaxis_title="PROYECTO", yaxis_title="", margin=dict(t=10, l=0, r=0, b=0), font=dict(family="Segoe UI", size=11, color="#4a5568"))
+                            df_graf_act = df_graf_act.rename(columns={'Presupuestado': 'Presupuesto'})
+                            df_melt_act = df_graf_act.melt(id_vars='PROYECTO', value_vars=['Analizado', 'Presupuesto', 'Contratado'], var_name='Fase', value_name='Valor')
+                            fig2 = px.bar(df_melt_act, x='PROYECTO', y='Valor', color='Fase', barmode='group', text='Valor', color_discrete_map=colores_marca)
+                            fig2.update_traces(texttemplate=f'<b>{simbolo_moneda} %{{y:,.0f}}</b>', textposition='inside', textangle=-90, insidetextanchor='middle', hovertemplate=f'<b>Proyecto:</b> %{{x}}<br><b>Fase:</b> %{{data.name}}<br><b>Valor:</b> {simbolo_moneda} %{{y:,.0f}}<extra></extra>')
+                            fig2.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title=""), xaxis_title="PROYECTO", yaxis_title="", margin=dict(t=10, l=0, r=0, b=0))
                             fig2.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f2f6', showticklabels=False)
-                            fig2.update_xaxes(showgrid=False)
                             st.plotly_chart(fig2, use_container_width=True, key=f"graf_a_{actividad}_{i+j}")
 
     # ------------------------------------------
@@ -463,10 +494,10 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             st.success("🎉 ¡Excelente! No hay registros con fases faltantes bajo estos filtros.")
         else:
             st.markdown("Los siguientes registros tienen al menos una fase sin precio asociado en el Excel.")
-            df_audit_mostrar = df_incompletos.rename(columns={'Analizado': 'Precio Analizado PYC', 'Presupuestado': 'Pre-Construcción', 'Contratado': 'Construcción'})
-            formatos_audit = {col: lambda x: f"{simbolo_moneda}{x:,.0f}" if pd.notna(x) else "❌ FALTA" for col in ['Precio Analizado PYC', 'Pre-Construcción', 'Construcción']}
+            df_audit_mostrar = df_incompletos.rename(columns={'Analizado': 'Precio Analizado PYC', 'Presupuestado': 'Presupuesto', 'Contratado': 'Contratado'})
+            formatos_audit = {col: lambda x: f"{simbolo_moneda}{x:,.0f}" if pd.notna(x) else "❌ FALTA" for col in ['Precio Analizado PYC', 'Presupuesto', 'Contratado']}
             def resaltar_faltantes(val): return 'background-color: #fee2e2; color: #b91c1c; font-weight:bold;' if pd.isna(val) else ''
-            cols_audit_ord = cols_agrupacion + ['Precio Analizado PYC', 'Pre-Construcción', 'Construcción'] + [c for c in cols_extras if c in df_audit_mostrar.columns]
-            st.dataframe(df_audit_mostrar[cols_audit_ord].style.map(resaltar_faltantes, subset=['Precio Analizado PYC', 'Pre-Construcción', 'Construcción']).format(formatos_audit), use_container_width=True, hide_index=True, height=500)
+            cols_audit_ord = cols_agrupacion + ['Precio Analizado PYC', 'Presupuesto', 'Contratado'] + [c for c in cols_extras if c in df_audit_mostrar.columns]
+            st.dataframe(df_audit_mostrar[cols_audit_ord].style.map(resaltar_faltantes, subset=['Precio Analizado PYC', 'Presupuesto', 'Contratado']).format(formatos_audit), use_container_width=True, hide_index=True, height=500)
 else:
     st.warning("⚠️ No existen registros numéricos válidos con la combinación de filtros seleccionada.")
