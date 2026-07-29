@@ -99,7 +99,7 @@ if mensaje != "OK":
     st.stop()
 
 # ==========================================
-# 3. FILTROS EN CASCADA GLOBAL (Lógica de Año Corregida)
+# 3. FILTROS EN CASCADA GLOBAL
 # ==========================================
 st.sidebar.header("🔍 Panel de Filtros Globales")
 
@@ -108,7 +108,6 @@ año_seleccionado = st.sidebar.multiselect("📅 Año de Construcción", options
 
 df_base = df.copy()
 if año_seleccionado:
-    # Nuevo filtro estricto por actividad y año
     df_contratados = df[(df['FASE DEL PRECIO'] == 'Contratado') & (df['AÑO_FECHA'].isin(año_seleccionado))]
     df_contratados['LLAVE_AÑO'] = df_contratados['PROYECTO'].astype(str) + "||" + df_contratados['GRUPO'].astype(str) + "||" + df_contratados['ACTIVIDAD'].astype(str)
     llaves_validas = df_contratados['LLAVE_AÑO'].unique()
@@ -224,8 +223,17 @@ if usar_pesos:
         df_pesos_guardados = st.data_editor(df_config_pesos, hide_index=True, use_container_width=True)
 
 # ==========================================
-# 5. MOTOR ESTADÍSTICO
+# 5. MOTOR ESTADÍSTICO Y COLECCIÓN PARA PDF
 # ==========================================
+# Declaramos contenedores de memoria para el PDF
+fig1 = None
+texto_resumen = ""
+val_txt_pre_ana = val_txt_con_pre = val_txt_con_ana = 0
+reporte_grupos = []
+reporte_actividades = []
+
+colores_marca = {'Analizado': '#FFC112', 'Presupuesto': '#223983', 'Contratado': '#00A54C'}
+
 if not df_filtrado.empty and col_valor in df_filtrado.columns:
     cols_agrupacion = [c for c in ['CIUDAD', 'PROYECTO', 'GRUPO', 'ACTIVIDAD'] if c in df.columns]
     cols_extras = [c for c in ['TIPO DE PROYECTO', 'CONTRATISTA/PROVEEDOR', 'ALCANCE', 'TRM(DIA DE CONTRATO /COTIZACION)'] if c in df_filtrado.columns]
@@ -266,8 +274,6 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
         df_completos['Peso Grupo (%)'] = df_completos['Peso Grupo (%)'].fillna(0)
         df_completos['Peso Actividad (%)'] = df_completos['Peso Actividad (%)'].fillna(0)
     
-    colores_marca = {'Analizado': '#FFC112', 'Presupuestado': '#223983', 'Contratado': '#00A54C'}
-
     # ==========================================
     # 6. CREACIÓN DE LAS PESTAÑAS Y TARJETAS
     # ==========================================
@@ -278,7 +284,6 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             st.warning("⚠️ No hay ítems con el ciclo de 3 fases completado para los filtros seleccionados.")
         else:
             df_resumen = df_completos.groupby('PROYECTO')[['Analizado', 'Presupuestado', 'Contratado']].mean().reset_index()
-            # Renombramos para la tabla interactiva
             df_mostrar_resumen = df_resumen.rename(columns={'Analizado': 'Precio Analizado PYC', 'Presupuestado': 'Presupuesto', 'Contratado': 'Contratado'})
             
             for col in ['Precio Analizado PYC', 'Presupuesto', 'Contratado']:
@@ -297,14 +302,12 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             df_tab1['Δ Con vs Pre'] = ((df_tab1['Contratado'] - df_tab1['Presupuestado']) / df_tab1['Presupuestado'])
             df_tab1['Δ Con vs Ana'] = ((df_tab1['Contratado'] - df_tab1['Analizado']) / df_tab1['Analizado'])
 
-            # LÓGICA DE COLORES INVERTIDA (Negativo Verde, Positivo Rojo, Cero Amarillo)
             def kpi(val):
                 if pd.isna(val): return "<div class='kpi-value' style='color:#8a98ac;'>N/A</div>"
                 val = val * 100
                 c = "#00A54C" if val < 0 else ("#e63946" if val > 0 else "#FFC112")
                 return f"<div class='kpi-value' style='color:{c};'>{'+' if val>0 else ''}{val:.2f}%</div>"
 
-            # PANEL GLOBAL PONDERADO
             st.markdown("### 🏆 Indicadores de Variaciones")
             if usar_pesos and 'Peso Grupo (%)' in df_tab1.columns:
                 k_w1, k_w2, k_w3 = st.columns(3)
@@ -325,7 +328,6 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             v_con_pre = ((prom_con - prom_pre) / prom_pre) if prom_pre else 0
             v_con_ana = ((prom_con - prom_ana) / prom_ana) if prom_ana else 0
 
-            # GENERACIÓN DEL REPORTE EJECUTIVO Y PDF
             st.markdown("---")
             val_txt_pre_ana = v_pre_ana_w if usar_pesos else v_pre_ana
             val_txt_con_pre = v_con_pre_w if usar_pesos else v_con_pre
@@ -334,33 +336,8 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             texto_resumen = f"En el análisis global, el indicador de Presupuesto vs Analizado muestra una variación del {val_txt_pre_ana*100:.2f}%. Por otro lado, la transición de Contratado vs Presupuesto refleja un impacto del {val_txt_con_pre*100:.2f}%. Finalmente, el desfase total (Contratado vs Analizado) se consolida en {val_txt_con_ana*100:.2f}%. Estos resultados indican una tendencia general {'favorable (ahorros)' if val_txt_con_ana < 0 else 'desfavorable (sobrecostos)'} frente a las estimaciones iniciales."
             
             st.info(f"📝 **Resumen Ejecutivo:**\n\n{texto_resumen}")
-
-            if FPDF is not None:
-                def crear_pdf():
-                    pdf = FPDF()
-                    pdf.add_page()
-                    pdf.set_font("Arial", 'B', 16)
-                    pdf.cell(0, 10, "Informe Ejecutivo de Asertividad de Precios", ln=True, align='C')
-                    pdf.ln(10)
-                    pdf.set_font("Arial", '', 12)
-                    pdf.multi_cell(0, 8, texto_resumen.encode('latin-1', 'replace').decode('latin-1'))
-                    pdf.ln(10)
-                    pdf.set_font("Arial", 'B', 12)
-                    pdf.cell(0, 10, f"% Presupuesto vs Analizado: {val_txt_pre_ana*100:.2f}%", ln=True)
-                    pdf.cell(0, 10, f"% Contratado vs Presupuesto: {val_txt_con_pre*100:.2f}%", ln=True)
-                    pdf.cell(0, 10, f"% Contratado vs Analizado: {val_txt_con_ana*100:.2f}%", ln=True)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                        pdf.output(tmp.name)
-                        with open(tmp.name, "rb") as f:
-                            return f.read()
-                
-                pdf_bytes = crear_pdf()
-                st.download_button(label="📥 Descargar Informe en PDF", data=pdf_bytes, file_name="Reporte_Asertividad.pdf", mime="application/pdf")
-            else:
-                st.warning("⚠️ El módulo de PDF no está instalado. Agrega `fpdf` a tu archivo `requirements.txt` en GitHub para habilitar la descarga.")
-
             st.markdown("---")
-            # PANEL GLOBAL SIN PONDERAR
+
             st.markdown("### 📊 Promedios Globales (Sin Ponderar)")
             k1, k2, k3 = st.columns(3)
             k1.markdown(f'<div class="kpi-card border-blue"><div class="kpi-title">% Presupuesto vs Analizado</div>{kpi(v_pre_ana)}</div>', unsafe_allow_html=True)
@@ -402,7 +379,6 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
 
             columnas_ordenadas = cols_agrupacion + ['Precio Analizado PYC', 'Presupuesto', 'Contratado'] + columnas_porcentaje + [c for c in cols_extras if c in df_mostrar_det.columns]
             
-            # Formato TRM sin decimales y con signo
             if 'TRM(DIA DE CONTRATO /COTIZACION)' in columnas_ordenadas:
                 formatos['TRM(DIA DE CONTRATO /COTIZACION)'] = lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A"
 
@@ -443,11 +419,14 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
                             df_graf_g = df_grp.groupby('PROYECTO')[['Analizado', 'Presupuestado', 'Contratado']].mean().reset_index()
                             df_graf_g = df_graf_g.rename(columns={'Presupuestado': 'Presupuesto'})
                             df_melt_g = df_graf_g.melt(id_vars='PROYECTO', value_vars=['Analizado', 'Presupuesto', 'Contratado'], var_name='Fase', value_name='Valor')
-                            fig = px.bar(df_melt_g, x='PROYECTO', y='Valor', color='Fase', barmode='group', text='Valor', color_discrete_map=colores_marca)
-                            fig.update_traces(texttemplate=f'<b>{simbolo_moneda} %{{y:,.0f}}</b>', textposition='inside', textangle=-90, insidetextanchor='middle', hovertemplate=f'<b>Proyecto:</b> %{{x}}<br><b>Fase:</b> %{{data.name}}<br><b>Valor:</b> {simbolo_moneda} %{{y:,.0f}}<extra></extra>')
-                            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title=""), xaxis_title="PROYECTO", yaxis_title="", margin=dict(t=10, l=0, r=0, b=0))
-                            fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f2f6', showticklabels=False)
-                            st.plotly_chart(fig, use_container_width=True, key=f"graf_g_{grupo}_{i+j}")
+                            fig_g = px.bar(df_melt_g, x='PROYECTO', y='Valor', color='Fase', barmode='group', text='Valor', color_discrete_map=colores_marca)
+                            fig_g.update_traces(texttemplate=f'<b>{simbolo_moneda} %{{y:,.0f}}</b>', textposition='inside', textangle=-90, insidetextanchor='middle')
+                            fig_g.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title=""), xaxis_title="", yaxis_title="", margin=dict(t=10, l=0, r=0, b=0))
+                            fig_g.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f2f6', showticklabels=False)
+                            st.plotly_chart(fig_g, use_container_width=True, key=f"graf_g_{grupo}_{i+j}")
+
+                            # Guardamos en la memoria para el PDF
+                            reporte_grupos.append({'nombre': grupo, 'pa': v_pre_ana, 'cp': v_con_pre, 'ca': v_con_ana, 'figura': fig_g})
 
     # ------------------------------------------
     # PESTAÑA 3: RESUMEN POR ACTIVIDAD
@@ -479,11 +458,14 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
                             df_graf_act = df_act.groupby('PROYECTO')[['Analizado', 'Presupuestado', 'Contratado']].mean().reset_index()
                             df_graf_act = df_graf_act.rename(columns={'Presupuestado': 'Presupuesto'})
                             df_melt_act = df_graf_act.melt(id_vars='PROYECTO', value_vars=['Analizado', 'Presupuesto', 'Contratado'], var_name='Fase', value_name='Valor')
-                            fig2 = px.bar(df_melt_act, x='PROYECTO', y='Valor', color='Fase', barmode='group', text='Valor', color_discrete_map=colores_marca)
-                            fig2.update_traces(texttemplate=f'<b>{simbolo_moneda} %{{y:,.0f}}</b>', textposition='inside', textangle=-90, insidetextanchor='middle', hovertemplate=f'<b>Proyecto:</b> %{{x}}<br><b>Fase:</b> %{{data.name}}<br><b>Valor:</b> {simbolo_moneda} %{{y:,.0f}}<extra></extra>')
-                            fig2.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title=""), xaxis_title="PROYECTO", yaxis_title="", margin=dict(t=10, l=0, r=0, b=0))
-                            fig2.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f2f6', showticklabels=False)
-                            st.plotly_chart(fig2, use_container_width=True, key=f"graf_a_{actividad}_{i+j}")
+                            fig_a = px.bar(df_melt_act, x='PROYECTO', y='Valor', color='Fase', barmode='group', text='Valor', color_discrete_map=colores_marca)
+                            fig_a.update_traces(texttemplate=f'<b>{simbolo_moneda} %{{y:,.0f}}</b>', textposition='inside', textangle=-90, insidetextanchor='middle')
+                            fig_a.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, title=""), xaxis_title="", yaxis_title="", margin=dict(t=10, l=0, r=0, b=0))
+                            fig_a.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f2f6', showticklabels=False)
+                            st.plotly_chart(fig_a, use_container_width=True, key=f"graf_a_{actividad}_{i+j}")
+
+                            # Guardamos en la memoria para el PDF
+                            reporte_actividades.append({'nombre': actividad, 'pa': v_pre_ana, 'cp': v_con_pre, 'ca': v_con_ana, 'figura': fig_a})
 
     # ------------------------------------------
     # PESTAÑA 4: AUDITORÍA (INCOMPLETOS)
@@ -493,11 +475,108 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
         if df_incompletos.empty:
             st.success("🎉 ¡Excelente! No hay registros con fases faltantes bajo estos filtros.")
         else:
-            st.markdown("Los siguientes registros tienen al menos una fase sin precio asociado en el Excel.")
             df_audit_mostrar = df_incompletos.rename(columns={'Analizado': 'Precio Analizado PYC', 'Presupuestado': 'Presupuesto', 'Contratado': 'Contratado'})
             formatos_audit = {col: lambda x: f"{simbolo_moneda}{x:,.0f}" if pd.notna(x) else "❌ FALTA" for col in ['Precio Analizado PYC', 'Presupuesto', 'Contratado']}
             def resaltar_faltantes(val): return 'background-color: #fee2e2; color: #b91c1c; font-weight:bold;' if pd.isna(val) else ''
             cols_audit_ord = cols_agrupacion + ['Precio Analizado PYC', 'Presupuesto', 'Contratado'] + [c for c in cols_extras if c in df_audit_mostrar.columns]
             st.dataframe(df_audit_mostrar[cols_audit_ord].style.map(resaltar_faltantes, subset=['Precio Analizado PYC', 'Presupuesto', 'Contratado']).format(formatos_audit), use_container_width=True, hide_index=True, height=500)
+
 else:
     st.warning("⚠️ No existen registros numéricos válidos con la combinación de filtros seleccionada.")
+
+# ==========================================
+# 7. EXPORTACIÓN PDF MAESTRO (BARRA LATERAL)
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.markdown("📄 **Exportar Reporte Completo a PDF**")
+
+if FPDF is not None and fig1 is not None:
+    def safe_txt(txt):
+        return str(txt).encode('latin-1', 'replace').decode('latin-1')
+
+    def f_pct(val):
+        return f"{val:.2f}%" if pd.notna(val) else "N/A"
+
+    def crear_pdf():
+        pdf = FPDF()
+        
+        # --- SECCIÓN 1: PANEL GLOBAL ---
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "Informe Ejecutivo de Asertividad de Precios", ln=True, align='C')
+        pdf.ln(5)
+        
+        pdf.set_font("Arial", '', 11)
+        pdf.multi_cell(0, 7, safe_txt(texto_resumen))
+        pdf.ln(5)
+        
+        pdf.set_font("Arial", 'B', 12)
+        tit_pesos = "Indicadores Globales (Ponderados):" if usar_pesos else "Indicadores Globales (Sin Ponderar):"
+        pdf.cell(0, 10, tit_pesos, ln=True)
+        pdf.set_font("Arial", '', 11)
+        pdf.cell(0, 8, f"   > % Presupuesto vs Analizado:     {val_txt_pre_ana*100:.2f}%", ln=True)
+        pdf.cell(0, 8, f"   > % Contratado vs Presupuesto: {val_txt_con_pre*100:.2f}%", ln=True)
+        pdf.cell(0, 8, f"   > % Contratado vs Analizado:     {val_txt_con_ana*100:.2f}%", ln=True)
+        pdf.ln(10)
+        
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Comparativa Consolidada de Fases por Proyecto:", ln=True)
+        pdf.ln(2)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_img:
+            fig1.write_image(tmp_img.name, format="png", engine="kaleido", width=900, height=450)
+            pdf.image(tmp_img.name, x=10, w=190)
+
+        # --- SECCIÓN 2: GRUPOS ---
+        if reporte_grupos:
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(0, 10, "RESUMEN DETALLADO POR GRUPO", ln=True, align='C')
+            pdf.ln(5)
+            for g in reporte_grupos:
+                if pdf.get_y() > 220:  # Salto de página automático si no cabe
+                    pdf.add_page()
+                pdf.set_font("Arial", 'B', 11)
+                pdf.cell(0, 8, safe_txt(f"GRUPO: {g['nombre']}"), ln=True)
+                pdf.set_font("Arial", '', 10)
+                pdf.cell(0, 5, f" % Presupuesto vs Analizado: {f_pct(g['pa'])}  |  % Contratado vs Presupuesto: {f_pct(g['cp'])}  |  % Contratado vs Analizado: {f_pct(g['ca'])}", ln=True)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_g:
+                    g['figura'].write_image(tmp_g.name, format="png", engine="kaleido", width=800, height=300)
+                    pdf.image(tmp_g.name, x=10, w=190)
+                pdf.ln(8)
+
+        # --- SECCIÓN 3: ACTIVIDADES ---
+        if reporte_actividades:
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(0, 10, "RESUMEN DETALLADO POR ACTIVIDAD", ln=True, align='C')
+            pdf.ln(5)
+            for a in reporte_actividades:
+                if pdf.get_y() > 220:
+                    pdf.add_page()
+                pdf.set_font("Arial", 'B', 11)
+                pdf.cell(0, 8, safe_txt(f"ACTIVIDAD: {a['nombre']}"), ln=True)
+                pdf.set_font("Arial", '', 10)
+                pdf.cell(0, 5, f" % Presupuesto vs Analizado: {f_pct(a['pa'])}  |  % Contratado vs Presupuesto: {f_pct(a['cp'])}  |  % Contratado vs Analizado: {f_pct(a['ca'])}", ln=True)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_a:
+                    a['figura'].write_image(tmp_a.name, format="png", engine="kaleido", width=800, height=300)
+                    pdf.image(tmp_a.name, x=10, w=190)
+                pdf.ln(8)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+            pdf.output(tmp_pdf.name)
+            with open(tmp_pdf.name, "rb") as f:
+                return f.read()
+    
+    # Generador con animacion de carga (spinner) porque Kaleido toma unos segundos en dibujar todas las graficas
+    st.sidebar.markdown("*(Nota: Generar el PDF toma unos segundos porque procesa todas las pestañas simultáneamente).*")
+    if st.sidebar.button("Generar Reporte Completo"):
+        with st.sidebar.status("📸 Capturando todas las gráficas...", expanded=True) as status:
+            try:
+                pdf_bytes = crear_pdf()
+                status.update(label="✅ ¡Reporte Listo!", state="complete", expanded=False)
+                st.sidebar.download_button(label="📥 Clic aquí para Descargar", data=pdf_bytes, file_name="Reporte_Completo_Asertividad.pdf", mime="application/pdf")
+            except Exception as e:
+                status.update(label="❌ Error al generar", state="error")
+                st.sidebar.error(f"Error técnico: {e}")
+else:
+    st.sidebar.info("Aplica filtros para activar la exportación.")
