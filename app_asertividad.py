@@ -338,7 +338,7 @@ if not df_filtrado.empty and col_valor in df_filtrado.columns:
             st.info(f"📝 **Resumen Ejecutivo:**\n\n{texto_resumen}")
             st.markdown("---")
 
-            st.markdown("### 📊 Promedios Globales (Sin Ponderar)")
+            st.markdown("### 📊 Promedios Globales")
             k1, k2, k3 = st.columns(3)
             k1.markdown(f'<div class="kpi-card border-blue"><div class="kpi-title">% Presupuesto vs Analizado</div>{kpi(v_pre_ana)}</div>', unsafe_allow_html=True)
             k2.markdown(f'<div class="kpi-card border-green"><div class="kpi-title">% Contratado vs Presupuesto</div>{kpi(v_con_pre)}</div>', unsafe_allow_html=True)
