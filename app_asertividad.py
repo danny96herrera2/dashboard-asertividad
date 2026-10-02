@@ -59,10 +59,14 @@ def cargar_y_procesar_base(ruta_archivo):
         
     df.columns = df.columns.astype(str).str.strip().str.upper()
     
-    # --- MAGIA LIMPIADORA: Quitar espacios fantasmas y estandarizar mayúsculas ---
+    # --- MAGIA LIMPIADORA AVANZADA ---
+    # 1. Borra espacios dobles, estandariza a mayúsculas
+    # 2. Evita que Python borre filas si olvidaste llenar una celda (pone 'NO ESPECIFICADO')
     for col_texto in ['CIUDAD', 'PROYECTO', 'GRUPO', 'ACTIVIDAD']:
         if col_texto in df.columns:
-            df[col_texto] = df[col_texto].astype(str).str.strip().str.upper()
+            df[col_texto] = df[col_texto].apply(
+                lambda x: " ".join(str(x).upper().split()) if pd.notna(x) and str(x).strip() != '' else "NO ESPECIFICADO"
+            )
     
     if 'FASE DEL PRECIO' not in df.columns:
         return pd.DataFrame(), f"Error: No se encontró 'FASE DEL PRECIO'. Detectadas: {', '.join(df.columns)}"
@@ -102,7 +106,6 @@ with st.spinner("🚀 Sincronizando Base de Datos..."):
 if mensaje != "OK":
     st.error(mensaje)
     st.stop()
-
 # ==========================================
 # 3. FILTROS EN CASCADA GLOBAL
 # ==========================================
