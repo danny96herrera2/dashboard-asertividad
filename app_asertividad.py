@@ -59,9 +59,7 @@ def cargar_y_procesar_base(ruta_archivo):
         
     df.columns = df.columns.astype(str).str.strip().str.upper()
     
-    # --- MAGIA LIMPIADORA AVANZADA ---
-    # 1. Borra espacios dobles, estandariza a mayúsculas
-    # 2. Evita que Python borre filas si olvidaste llenar una celda (pone 'NO ESPECIFICADO')
+    # 1. Limpieza de textos y espacios dobles
     for col_texto in ['CIUDAD', 'PROYECTO', 'GRUPO', 'ACTIVIDAD']:
         if col_texto in df.columns:
             df[col_texto] = df[col_texto].apply(
@@ -71,12 +69,52 @@ def cargar_y_procesar_base(ruta_archivo):
     if 'FASE DEL PRECIO' not in df.columns:
         return pd.DataFrame(), f"Error: No se encontró 'FASE DEL PRECIO'. Detectadas: {', '.join(df.columns)}"
 
+    # 2. INTELIGENCIA FINANCIERA (Limpieza a prueba de balas para Puntos y Comas)
+    def limpiar_dinero(val):
+        import re
+        if pd.isna(val): return None
+        if isinstance(val, (int, float)): return float(val)
+        
+        v = str(val).strip().replace('$', '').replace(' ', '')
+        if v == '' or v.upper() == 'NAN' or v.upper() == 'NONE': return None
+        
+        # Si tiene punto Y coma (Ej: 1,234.56 o 1.234,56)
+        if '.' in v and ',' in v:
+            if v.rfind('.') > v.rfind(','): # Estilo US: 1,234.56
+                v = v.replace(',', '')
+            else: # Estilo COL/EU: 1.234,56
+                v = v.replace('.', '').replace(',', '.')
+        # Si solo tiene coma
+        elif ',' in v:
+            partes = v.split(',')
+            if len(partes) > 2: 
+                v = v.replace(',', '') # Ej: 1,234,567
+            elif len(partes[1]) == 3:
+                v = v.replace(',', '') # Ej: 12,500 (Asume que son miles)
+            else:
+                v = v.replace(',', '.') # Ej: 12,50 (Asume que es decimal)
+        # Si solo tiene punto
+        elif '.' in v:
+            partes = v.split('.')
+            if len(partes) > 2:
+                v = v.replace('.', '') # Ej: 1.234.567
+            elif len(partes[1]) == 3:
+                v = v.replace('.', '') # Ej: 12.500 (Asume que son miles)
+            else:
+                pass # Ej: 12.5 (Ya es un decimal correcto en Python)
+                
+        v = re.sub(r'[^\d\.-]', '', v)
+        try:
+            return float(v)
+        except:
+            return None
+
     cols_dinero = ['VALOR EN PESOS COLOMBIANOS X PARADA', 'PRECIO USD(SOLO SUMINISTRO)']
     for c in cols_dinero:
         if c in df.columns:
-            df[c] = df[c].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.replace(' ', '', regex=False).str.replace(r'[^\d\.-]', '', regex=True)
-            df[c] = pd.to_numeric(df[c], errors='coerce')
+            df[c] = df[c].apply(limpiar_dinero)
 
+    # 3. Estandarización de Fases
     df['FASE DEL PRECIO'] = df['FASE DEL PRECIO'].fillna('').astype(str).str.strip().str.upper()
     df.loc[df['FASE DEL PRECIO'].str.contains('ANALIZADO', na=False), 'FASE DEL PRECIO'] = 'Analizado'
     df.loc[df['FASE DEL PRECIO'].str.contains('PRE-CONST', na=False) | df['FASE DEL PRECIO'].str.contains('PRECONST', na=False), 'FASE DEL PRECIO'] = 'Presupuestado'
@@ -89,23 +127,6 @@ def cargar_y_procesar_base(ruta_archivo):
         df['AÑO_FECHA'] = None
 
     return df, "OK"
-
-archivo_residente = None
-if os.path.exists("base_datos.xlsx"):
-    archivo_residente = "base_datos.xlsx"
-elif os.path.exists("base_datos.csv"):
-    archivo_residente = "base_datos.csv"
-
-if archivo_residente is None:
-    st.info("👋 **¡Bienvenido al sistema corporativo!**\n\nSube tu archivo consolidado a GitHub renombrado exactamente como **`base_datos.xlsx`**.")
-    st.stop()
-
-with st.spinner("🚀 Sincronizando Base de Datos..."):
-    df, mensaje = cargar_y_procesar_base(archivo_residente)
-    
-if mensaje != "OK":
-    st.error(mensaje)
-    st.stop()
 # ==========================================
 # 3. FILTROS EN CASCADA GLOBAL
 # ==========================================
