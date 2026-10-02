@@ -59,7 +59,7 @@ def cargar_y_procesar_base(ruta_archivo):
         
     df.columns = df.columns.astype(str).str.strip().str.upper()
     
-    # 1. Limpieza de textos y espacios dobles
+    # 1. Limpieza de textos y espacios dobles fantasma
     for col_texto in ['CIUDAD', 'PROYECTO', 'GRUPO', 'ACTIVIDAD']:
         if col_texto in df.columns:
             df[col_texto] = df[col_texto].apply(
@@ -127,6 +127,24 @@ def cargar_y_procesar_base(ruta_archivo):
         df['AÑO_FECHA'] = None
 
     return df, "OK"
+
+archivo_residente = None
+if os.path.exists("base_datos.xlsx"):
+    archivo_residente = "base_datos.xlsx"
+elif os.path.exists("base_datos.csv"):
+    archivo_residente = "base_datos.csv"
+
+if archivo_residente is None:
+    st.info("👋 **¡Bienvenido al sistema corporativo!**\n\nSube tu archivo consolidado a GitHub renombrado exactamente como **`base_datos.xlsx`**.")
+    st.stop()
+
+with st.spinner("🚀 Sincronizando Base de Datos..."):
+    df, mensaje = cargar_y_procesar_base(archivo_residente)
+    
+if mensaje != "OK":
+    st.error(mensaje)
+    st.stop()
+
 # ==========================================
 # 3. FILTROS EN CASCADA GLOBAL
 # ==========================================
@@ -158,7 +176,7 @@ grupo = st.sidebar.multiselect("📁 Filtrar por Grupo", options=lista_grupos)
 df_f2 = df_f1_5[df_f1_5.get('GRUPO', pd.Series(dtype=str)).astype(str).isin(grupo)] if grupo else df_f1_5
 
 lista_actividades = sorted([str(x) for x in df_f2.get('ACTIVIDAD', pd.Series(dtype=str)).dropna().unique()])
-actividad = st.sidebar.multiselect("🛠️️ Filtrar por Actividad", options=lista_actividades)
+actividad = st.sidebar.multiselect("🛠 Filtrar por Actividad", options=lista_actividades)
 df_f3 = df_f2[df_f2.get('ACTIVIDAD', pd.Series(dtype=str)).astype(str).isin(actividad)] if actividad else df_f2
 
 if 'CONTRATISTA/PROVEEDOR' in df_f3.columns:
